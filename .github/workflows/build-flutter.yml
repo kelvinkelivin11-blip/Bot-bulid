@@ -1,19 +1,98 @@
-- name: Extract source
-  run: |
-    mkdir -p source
-    curl -fL -o source.zip "https://github.com/kelvinkelivin11-blip/Bot-bulid/releases/download/build-8558349800-1792045500891/BaseXakataV4.1.zip"
-    unzip -q source.zip -d source
+- name: Build Flutter APK
 
-- name: Detect Flutter project
-  run: |
-    FILE=$(find "$GITHUB_WORKSPACE/source" \
-      -name pubspec.yaml -type f -print -quit)
+on:
+  workflow_dispatch:
+    inputs:
+      jobId:
+        description: "Unique job ID / tag"
+        required: true
+        type: string
+      userId:
+        description: "User ID"
+        required: false
+        type: string
+        default: "0"
+      payload:
+        description: "JSON payload containing url, buildType, fileName"
+        required: true
+        type: string
 
-    if [ -z "$FILE" ]; then
-      echo "ERROR: pubspec.yaml tidak ditemukan."
-      echo "Isi ZIP:"
-      find source -maxdepth 3 -type f | head -100
-      exit 1
-    fi
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
 
-    echo "PROJECT_DIR=$(dirname "$FILE")" >> "$GITHUB_ENV": 1
+    steps:
+      - name: Parse payload
+        id: meta
+        run: |
+          echo '${{ inputs.payload }}' > /tmp/payload.json
+          URL=$(jq -r '.url // empty' /tmp/payload.json)
+          BUILD_TYPE=$(jq -r '.buildType // "release"' /tmp/payload.json)
+          FILE_NAME=$(jq -r '.fileName // "project.zip"' /tmp/payload.json)
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "build_type=$BUILD_TYPE" >> $GITHUB_OUTPUT
+          echo "file_name=$FILE_NAME" >> $GITHUB_OUTPUT
+          echo "job_id=${{ inputs.jobId }}" >> $GITHUB_OUTPUT
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.24.5"
+          channel: "stable"
+          cache: true
+
+      - name: Download source ZIP
+        run: |
+          mkdir -p source
+          curl -L -o source.zip "${{ steps.meta.outputs.url }}"
+          unzip -q source.zip -d source
+          if [ -f source/pubspec.yaml ]; then
+            echo "PROJECT_DIR=source" >> $GITHUB_ENV
+          else
+            DIR=$(find source -name "pubspec.yaml" -type f | head -1 | xargs dirname)
+            if [ -z "$DIR" ]; then
+              echo "❌ pubspec.yaml tidak ditemukan di ZIP"
+              exit 1
+            fi
+            echo "PROJECT_DIR=$DIR" >> $GITHUB_ENV
+          fi
+          echo "Project dir: $PROJECT_DIR"
+
+      - name: Flutter pub get
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter pub get
+
+      - name: Build APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          if [ "${{ steps.meta.outputs.build_type }}" = "debug" ]; then
+            flutter build apk --debug
+          else
+            flutter build apk --release
+          fi
+
+      - name: Locate APK
+        id: apk
+        run: |
+          APK=$(find ${{ env.PROJECT_DIR }}/build/app/outputs -name "*.apk" | head -1)
+          if [ -z "$APK" ]; then
+            echo "❌ APK tidak ditemukan"
+            exit 1
+          fi
+          echo "path=$APK" >> $GITHUB_OUTPUT
+          echo "Found APK: $APK"
+          cp "\( APK" "./app- \){{ steps.meta.outputs.job_id }}.apk"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ steps.meta.outputs.job_id }}
+          path: ./app-${{ steps.meta.outputs.job_id }}.apk
+          retention-days: 1
