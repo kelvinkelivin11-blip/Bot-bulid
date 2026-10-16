@@ -49,16 +49,32 @@ jobs:
           cache: true
 
       - name: Download source ZIP
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p source
-          curl -L -o source.zip "${{ steps.meta.outputs.url }}"
-          unzip -q source.zip -d source
+          echo "Downloading: ${{ steps.meta.outputs.url }}"
+          curl -L -H "Authorization: token $GH_TOKEN" -H "Accept: application/octet-stream" \
+            -o source.zip "${{ steps.meta.outputs.url }}"
+          
+          if [ ! -s source.zip ]; then
+            echo "❌ Gagal download ZIP (file kosong / 404)"
+            exit 1
+          fi
+          
+          unzip -q source.zip -d source || {
+            echo "❌ Gagal unzip. Coba cek isi file:"
+            file source.zip || true
+            exit 1
+          }
+          
           if [ -f source/pubspec.yaml ]; then
             echo "PROJECT_DIR=source" >> $GITHUB_ENV
           else
             DIR=$(find source -name "pubspec.yaml" -type f | head -1 | xargs dirname)
             if [ -z "$DIR" ]; then
               echo "❌ pubspec.yaml tidak ditemukan di ZIP"
+              find source -type f | head -30
               exit 1
             fi
             echo "PROJECT_DIR=$DIR" >> $GITHUB_ENV
@@ -84,6 +100,7 @@ jobs:
           APK=$(find ${{ env.PROJECT_DIR }}/build/app/outputs -name "*.apk" | head -1)
           if [ -z "$APK" ]; then
             echo "❌ APK tidak ditemukan"
+            find ${{ env.PROJECT_DIR }}/build -type f | head -50 || true
             exit 1
           fi
           echo "path=$APK" >> $GITHUB_OUTPUT
