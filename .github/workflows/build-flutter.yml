@@ -59,6 +59,7 @@ jobs:
           
           if [ ! -s source.zip ]; then
             echo "❌ Gagal download ZIP (file kosong / 404)"
+            ls -la source.zip || true
             exit 1
           fi
           
@@ -105,7 +106,7 @@ jobs:
           fi
           echo "path=$APK" >> $GITHUB_OUTPUT
           echo "Found APK: $APK"
-          cp "\( APK" "./app- \){{ steps.meta.outputs.job_id }}.apk"
+          cp "$APK" "./app-${{ steps.meta.outputs.job_id }}.apk"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
